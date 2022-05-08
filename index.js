@@ -1,15 +1,10 @@
 const express = require("express");
-let responseTime = require("response-time");
+const cluster = require("cluster");
+const numCPUs = require("os").cpus().length;
 let {config} = require("./config");
-let gzip = require("compression");
-let logger4Js = require("log4js");
-let loggerWinston = require("./utils/loggers/winston");
 const app = express();
-const PORT = config.port;
-logger4Js.configure({
-    appenders:{ cheese: { type:"file", filename: "cheese.log"}},
-    categories: { default: { appenders:["cheese"], level:"info"}}
-});
+const PORT = 3002;
+let modo_cluster = process.argv[2] == "Cluster";
 let pino = require("pino")({
     prettyPrint: {
         translateTime: "dd-mm hh",
@@ -17,61 +12,63 @@ let pino = require("pino")({
     }
 });
 
-
-let saludo = "Hola Que tal!";
-
-app.use(responseTime());
-
-/* app.get("/info", (req, res, next)=>{      //sin gzip
-    res.send(saludo.repeat(1000));
-}); */
-
-
-/* app.get("/info", gzip(), (req, res, next)=>{                 //con gzip
-    // const compressed = await gzip(`${saludo.repeat(1000)}`)
-    res.send(saludo.repeat(1000));
-});
-*/
-
-
-let isnum = num => !isNaN(num);
-
-app.get("/suma", (req, res, next)=>{
-    // let logger = logger4Js.getLogger('cheese');
-    try {
-        let { a, b } = req.query; 
-        if(!a || !b) {
-            loggerWinston.info("Falta información para realizar el servicio");
-            // logger.fatal("Falta información para realizar el servicio");
-            throw new Error("Falta información para realizar el servicio");
-        }
-        if(!isnum(a) || !isnum(b)){
-            loggerWinston.info("Has enviado un valor no válido para la suma");
-            // logger.fatal("Has enviado un valor no válido para la suma");
-            throw new Error("Has enviado un valor no válido para la suma");
-        }
-        let r = Number(a) + Number(b);
-        loggerWinston.warning(`La suma entre ${a} + ${b} es ${r}`);
-        // logger.info(`La suma entre ${a} + ${b} es ${r}`);
-        res.send(`La suma entre ${a} + ${b} es ${r}`);
-    } catch (error) {
-        loggerWinston.error(JSON.stringify(error));
-        // logger.error(JSON.stringify(error));
+let isPrime = num =>{
+    for (let i = 2; i < num; i++) {
+        if(num % i === 0) return false;
     }
-    // const compressed = await gzip(`${saludo.repeat(1000)}`)
-    res.send("Hubo un error");
+    return true;
+}
+
+
+// Ejercicio 1
+app.get("/", (req, res, next)=>{
+    console.log(".............................");
+    let primes = [];
+    let max = Number(req.query.max) || 1000;
+    console.log("max", max);
+    for (let i = 1; i <= max; i++) {
+        if(isPrime(i)) primes.push(i);
+    }
+    res.send(primes);
+});
+
+app.get("/nobloq", (req, res, next)=>{
+    let primes = [];
+    let max = Number(req.query.max) || 1000;
+    for (let i = 1; i <= max; i++) {
+        if(isPrime(i)) primes.push(i);
+    }
+    res.send(primes);
+});
+
+app.get("/bloq", (req, res, next)=>{
+    let primes = [];
+    let max = Number(req.query.max) || 1000;
+    console.log("max", max);
+    for (let i = 1; i <= max; i++) {
+        if(isPrime(i)) primes.push(i);
+    }
+    console.log("---------------------------------------");
+    console.log(primes);
+    res.send(primes);
 });
 
 
+if(modo_cluster && cluster.isPrimary){
+    pino.info(`PID -> ${process.pid}`);
 
-app.get("/pino", (req, res, next)=>{
-    pino.info("Desde pino, clase 18135");
-    pino.error("Error desde pino");
-    res.send(true);
-});
+    for (let i = 0; i < numCPUs; i++) {
+        cluster.fork();        
+    }
+
+    cluster.on('exit', (worker, a, b)=>{
+        pino.error(`Murió el subproceso ${worker.process.pid}`);
+        cluster.fork();
+    })
+}else{
+    app.listen(PORT, ()=>{
+        console.log(`Server On http://localhost:${PORT}`);
+    })
+}
 
 
-
-app.listen(PORT, ()=>{
-    console.log(`Server On http://localhost:${PORT}`);
-})
